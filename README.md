@@ -1,10 +1,44 @@
 # Equation Refs
 
-Number display equations in [Obsidian](https://obsidian.md) **only when you link to them**, and show the links as the numbers, like LaTeX's `\eqref`. It works in Reading view, Live Preview, embeds and PDF export.
+[![Release](https://img.shields.io/github/v/release/dingzy53/obsidian-equation-refs)](https://github.com/dingzy53/obsidian-equation-refs/releases/latest)
+[![Downloads](https://img.shields.io/badge/dynamic/json?label=downloads&logo=obsidian&color=7c3aed&query=%24%5B%22equation-refs%22%5D.downloads&url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2Fmaster%2Fcommunity-plugin-stats.json)](https://community.obsidian.md/plugins/equation-refs)
+[![Obsidian](https://img.shields.io/badge/Obsidian-1.13.0%2B-7c3aed?logo=obsidian)](https://obsidian.md)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
+Number display equations in [Obsidian](https://obsidian.md) **only when you link to them**, and show the links as the numbers, like LaTeX's `\eqref`.
+
+<!-- Screenshot: docs/images/hero.png -->
+
+## Features
+
+- Works in Reading view, Live Preview, embeds and PDF export.
 - Uses Obsidian's own block links (`[[note#^label]]`). No new syntax, and your notes are never modified.
 - Zero runtime dependencies. You don't need MathLinks or any other plugin.
 - Numbers are drawn with CSS, so MathJax doesn't re-render as you type or scroll.
+
+## Requirements
+
+- Obsidian 1.13.0 or newer, on desktop or mobile.
+
+## Installation
+
+**From the community directory** (recommended)
+
+1. Open **Settings → Community plugins** and turn on community plugins if asked.
+2. Select **Browse**, search for **Equation Refs**, then select **Install** and **Enable**.
+
+You can also open the plugin's page: [community.obsidian.md/plugins/equation-refs](https://community.obsidian.md/plugins/equation-refs).
+
+**Manually**
+
+1. Download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/dingzy53/obsidian-equation-refs/releases/latest).
+2. In **Settings → Community plugins**, select the folder icon next to **Installed plugins**. This opens `<vault>/.obsidian/plugins/`.
+3. Create a folder named `equation-refs` there and put the three files in it.
+4. Select the reload icon next to **Installed plugins**, then enable **Equation Refs**.
+
+**Beta versions:** install [BRAT](https://github.com/TfTHacker/obsidian42-brat) and add `dingzy53/obsidian-equation-refs`.
+
+**Update or remove:** select **Check for updates** or **Uninstall** in **Settings → Community plugins**.
 
 ## Usage
 
@@ -57,6 +91,11 @@ body {
 
 Numbered equations have the class `eqref-numbered`, and the number is in their `data-eq-number` attribute. Formatted links have the class `eqref-link`.
 
+## Privacy and security
+
+- No network access, and no files outside the vault.
+- Notes are only read, never changed: numbers exist only on screen and in exported PDFs.
+
 ## Limitations
 
 - Only top-level `$$` blocks are numbered. Equations inside callouts, block quotes or lists aren't.
@@ -67,12 +106,6 @@ Numbered equations have the class `eqref-numbered`, and the number is in their `
 ## Similar plugins
 
 [Equation Citator](https://github.com/FRIEDparrot/obsidian-equation-citator), [Latex Equation References](https://github.com/GeorgRasumov/Obsidian-Latex-Equation-References), [Auto Equation Numbering](https://github.com/Wolframscs/obsidian-Auto-Equation-Numbering) and [Equation Ordinal](https://github.com/Junzi-ana/equation-ordinal) use LaTeX-style `\label`/`\ref` syntax or write numbers into your files. Equation Refs instead uses Obsidian's native block links, numbers only the equations you link to, and never edits your notes.
-
-## Installation
-
-From Obsidian: **Settings → Community plugins → Browse**, search for "Equation Refs", then select **Install** and **Enable**.
-
-To install by hand, download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/dingzy53/obsidian-equation-refs/releases/latest). Put them in `<vault>/.obsidian/plugins/equation-refs/`, then enable the plugin in **Settings → Community plugins**.
 
 ## Development
 
@@ -86,7 +119,7 @@ npm test        # unit tests for src/core
 
 `test-vault/` has example notes. Open it as a vault and link the build output into `test-vault/.obsidian/plugins/equation-refs/`. See [PLAN.md](PLAN.md) for the design.
 
-## Acknowledgements
+## Credits
 
 Inspired by [LaTeX-like Theorem & Equation Referencer](https://github.com/RyotaUshio/obsidian-latex-theorem-equation-referencer) (formerly Math Booster) by Ryota Ushio, released under the MIT License. Equation Refs reimplements only its equation-numbering and referencing idea, from scratch. Thank you for the original work.
 
