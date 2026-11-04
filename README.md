@@ -92,4 +92,4 @@ Inspired by [LaTeX-like Theorem & Equation Referencer](https://github.com/RyotaU
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) © 2026 Ding Zheng Yuan
