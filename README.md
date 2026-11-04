@@ -7,7 +7,7 @@
 
 Number display equations in [Obsidian](https://obsidian.md) **only when you link to them**, and show the links as the numbers, like LaTeX's `\eqref`.
 
-<!-- Screenshot: docs/images/hero.png -->
+<img src="docs/images/hero.png" alt="Equations numbered only when they are linked" width="748">
 
 ## Features
 
