@@ -18,7 +18,7 @@
 		"math"
 	],
 	"author": "Ding Zheng Yuan",
-	"repository": { "type": "git", "url": "git+https://github.com/dingzy53/equation-refs.git" },
+	"repository": { "type": "git", "url": "git+https://github.com/dingzy53/obsidian-equation-refs.git" },
 	"license": "MIT",
 	"devDependencies": {
 		"@codemirror/language": "^6.13.1",

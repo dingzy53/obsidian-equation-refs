@@ -72,7 +72,7 @@ Numbered equations have the class `eqref-numbered`, and the number is in their `
 
 From Obsidian: **Settings → Community plugins → Browse**, search for "Equation Refs", then select **Install** and **Enable**.
 
-To install by hand, download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/dingzy53/equation-refs/releases/latest). Put them in `<vault>/.obsidian/plugins/equation-refs/`, then enable the plugin in **Settings → Community plugins**.
+To install by hand, download `main.js`, `manifest.json` and `styles.css` from the [latest release](https://github.com/dingzy53/obsidian-equation-refs/releases/latest). Put them in `<vault>/.obsidian/plugins/equation-refs/`, then enable the plugin in **Settings → Community plugins**.
 
 ## Development
 
