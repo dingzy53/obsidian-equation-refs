@@ -9,6 +9,7 @@ import { MathBlockInfo, blockAtLine, scanMathBlocks } from '../../core/math-sour
 import { EquationLabel } from '../../core/numbering';
 import type EquationRefsPlugin from '../../main';
 import { DISPLAY_MATH, setEquationNumber } from '../dom';
+import { labelInDoc } from './live-labels';
 
 /** Block widgets for `$$` blocks, plus one-line `$$ … $$` rendered inside a line. */
 const BLOCK_MATH = `:scope > .cm-embed-block.math ${DISPLAY_MATH}`;
@@ -72,7 +73,7 @@ class EquationNumbersView implements PluginValue {
 				// Inline-rendered math must sit on the block's own lines, not just after it.
 				if (block && mathEl.closest('.cm-line') && line > block.endLine) block = null;
 				const id = block?.id;
-				return [mathEl, id ? this.plugin.numbers.get(path, id) : undefined];
+				return [mathEl, id ? labelInDoc(this.plugin, path, doc, id) : undefined];
 			} catch {
 				// posAtDOM can throw while the widget is being replaced; the next update catches up.
 				return [mathEl, undefined];

@@ -10,6 +10,7 @@ import { EventRef, HoverParent, Keymap, editorInfoField, editorLivePreviewField 
 import { HOVER_SOURCE } from '../../constants';
 import { findBlockLinks } from '../../core/links';
 import type EquationRefsPlugin from '../../main';
+import { labelInDoc } from './live-labels';
 
 const refresh = StateEffect.define<null>();
 
@@ -72,7 +73,11 @@ class ReferenceLinksView implements PluginValue {
 				if (/code|math|comment/.test(tree.resolveInner(start, 1).name)) continue;
 
 				const target = link.path ? metadataCache.getFirstLinkpathDest(link.path, source.path) : source;
-				const label = target ? this.plugin.numbers.get(target.path, link.id) : undefined;
+				const label = !target
+					? undefined
+					: target.path === source.path
+						? labelInDoc(this.plugin, source.path, state.doc, link.id)
+						: this.plugin.numbers.get(target.path, link.id);
 				if (!target || !label) continue;
 
 				const text = this.plugin.referenceText(source.path, target, label);

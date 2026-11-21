@@ -3,6 +3,7 @@ import { blockAtLine, classifyEquation, linesOf, scanMathBlocks, stripTexComment
 import { numberEquations, sameLabels } from '../src/core/numbering';
 import { blockIdFromSubpath, findBlockLinks } from '../src/core/links';
 import { formatReference, validateTemplate } from '../src/core/format';
+import { numberNoteEquations, readNoteEquations } from '../src/core/live-numbering';
 
 describe('scanMathBlocks', () => {
 	it('finds multi-line blocks with an ID on the next line', () => {
@@ -128,5 +129,36 @@ describe('format', () => {
 	it('validates templates', () => {
 		expect(validateTemplate('({n})')).toBeUndefined();
 		expect(validateTemplate('(x)')).toBeTypeOf('string');
+	});
+});
+
+describe('live note numbering', () => {
+	const labels = (text: string, elsewhere?: (id: string) => boolean) =>
+		Object.fromEntries([...numberNoteEquations(readNoteEquations(text), elsewhere)].map(([id, l]) => [id, l.text]));
+
+	it('numbers an equation linked from the same note', () => {
+		const text = ['$$', 'a^2 + b^2 = c^2', '$$', '^pyth', '', 'Pythagoras: [[#^pyth]].'].join('\n');
+		expect(numberNoteEquations(readNoteEquations(text)).get('pyth')).toEqual({ text: '1', tagged: false });
+	});
+
+	it('skips unreferenced equations', () => {
+		const text = ['$$ x $$ ^a', '$$ y $$ ^b', 'See [[#^b]].'].join('\n');
+		expect(labels(text)).toEqual({ b: '1' });
+	});
+
+	it('counts references from elsewhere in document order', () => {
+		const text = ['$$ x $$ ^a', '$$ y $$ ^pyth', 'See [[#^pyth]].'].join('\n');
+		expect(labels(text, (id) => id === 'a')).toEqual({ a: '1', pyth: '2' });
+	});
+
+	it('ignores links to other notes and embeds', () => {
+		const text = ['$$ x $$ ^x', '[[Other#^x]] ![[#^x]]'].join('\n');
+		expect(readNoteEquations(text).linked.size).toBe(0);
+		expect(labels(text)).toEqual({});
+	});
+
+	it('keeps manual tags and skips \\notag', () => {
+		const text = ['$$ x \\notag $$ ^n', '$$ y \\tag{A} $$ ^t', '$$ z $$ ^z', '[[#^n]] [[#^t]] [[#^z]]'].join('\n');
+		expect(labels(text)).toEqual({ t: 'A', z: '1' });
 	});
 });

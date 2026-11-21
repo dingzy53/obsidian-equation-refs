@@ -55,6 +55,11 @@ export class EquationNumbers extends Component {
 		return this.labels.get(path)?.get(id);
 	}
 
+	/** True if anything in the vault links to block `id` of the note at `path`. */
+	isReferenced(path: string, id: string): boolean {
+		return this.refs.isReferenced(path, id);
+	}
+
 	/** IDs of a numbered note's display equations in document order, for matching rendered equations by position. */
 	equationIds(path: string): readonly (string | null)[] | undefined {
 		return this.order.get(path);
