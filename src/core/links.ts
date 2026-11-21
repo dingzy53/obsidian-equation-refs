@@ -28,3 +28,11 @@ export function findBlockLinks(text: string): BlockLinkMatch[] {
 	}
 	return matches;
 }
+
+/**
+ * What to show for an unaliased block link with no equation number, or null to leave it to Obsidian.
+ * Obsidian's Live Preview shows a same-note `[[#^id]]` as empty text, so show `#^id` instead.
+ */
+export function unnumberedLinkText(link: Pick<BlockLinkMatch, 'path' | 'linktext'>): string | null {
+	return link.path ? null : link.linktext;
+}
