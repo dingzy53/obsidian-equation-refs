@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { blockAtLine, classifyEquation, linesOf, scanMathBlocks, stripTexComments } from '../src/core/math-source';
 import { numberEquations, sameLabels } from '../src/core/numbering';
-import { blockIdFromSubpath, findBlockLinks } from '../src/core/links';
+import { blockIdFromSubpath, findBlockLinks, unnumberedLinkText } from '../src/core/links';
 import { formatReference, validateTemplate } from '../src/core/format';
 import { numberNoteEquations, readNoteEquations } from '../src/core/live-numbering';
 
@@ -160,5 +160,17 @@ describe('live note numbering', () => {
 	it('keeps manual tags and skips \\notag', () => {
 		const text = ['$$ x \\notag $$ ^n', '$$ y \\tag{A} $$ ^t', '$$ z $$ ^z', '[[#^n]] [[#^t]] [[#^z]]'].join('\n');
 		expect(labels(text)).toEqual({ t: 'A', z: '1' });
+	});
+});
+
+describe('unnumberedLinkText', () => {
+	it('shows a same-note block link as its link text', () => {
+		const [link] = findBlockLinks('See [[#^para]].');
+		expect(link && unnumberedLinkText(link)).toBe('#^para');
+	});
+
+	it('leaves links to other notes to Obsidian', () => {
+		const [link] = findBlockLinks('See [[Other#^para]].');
+		expect(link && unnumberedLinkText(link)).toBeNull();
 	});
 });

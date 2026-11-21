@@ -1,5 +1,6 @@
 /**
- * Live Preview: show unaliased links to numbered equations as their numbers.
+ * Live Preview: show unaliased links to numbered equations as their numbers,
+ * and unnumbered same-note block links as `#^id` instead of Obsidian's empty text.
  * The raw link comes back while the cursor is inside it.
  */
 
@@ -8,7 +9,7 @@ import { EditorState, RangeSetBuilder, StateEffect } from '@codemirror/state';
 import { Decoration, DecorationSet, EditorView, PluginValue, ViewPlugin, ViewUpdate, WidgetType } from '@codemirror/view';
 import { EventRef, HoverParent, Keymap, editorInfoField, editorLivePreviewField } from 'obsidian';
 import { HOVER_SOURCE } from '../../constants';
-import { findBlockLinks } from '../../core/links';
+import { findBlockLinks, unnumberedLinkText } from '../../core/links';
 import type EquationRefsPlugin from '../../main';
 import { labelInDoc } from './live-labels';
 
@@ -78,9 +79,10 @@ class ReferenceLinksView implements PluginValue {
 					: target.path === source.path
 						? labelInDoc(this.plugin, source.path, state.doc, link.id)
 						: this.plugin.numbers.get(target.path, link.id);
-				if (!target || !label) continue;
+				if (!target) continue;
 
-				const text = this.plugin.referenceText(source.path, target, label);
+				const text = label ? this.plugin.referenceText(source.path, target, label) : unnumberedLinkText(link);
+				if (text === null) continue;
 				builder.add(start, end, Decoration.replace({
 					widget: new ReferenceWidget(this.plugin, text, link.linktext, source.path),
 				}));

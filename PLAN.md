@@ -1,6 +1,6 @@
 # PLAN: prevent transient blank reference after programmatic editor restore
 
-> Branch: `fix/blank-ref-after-external-change` (from `main` at `65de4d4`, tag `1.0.2`) · Date: 2026-11-20 · Status: Fix 1 implemented; fix 2 not started (waits on the open question).
+> Branch: `fix/blank-ref-after-external-change` (from `main` at `65de4d4`, tag `1.0.2`) · Date: 2026-11-20 · Status: Fixes 1 and 2 implemented.
 >
 > The initial build plan for Equation Refs 1.0.0 is finished and shipped; see git history at `65de4d4` for its text.
 
@@ -43,7 +43,7 @@ When another plugin (such as `obsidian-uncommited`'s per-change **Restore**) res
    - Also do the same live-doc fallback in `EquationNumbersView.read()` (`src/render/live-preview/equation-numbers.ts:75`) when `this.plugin.numbers.get(path, id)` is not yet populated by `metadataCache`.
    - Result: in Live Preview, adding or restoring a same-note `[[#^id]]` link or `$$ … $$ ^id` equation numbers both the equation and the reference **immediately on the same frame**, without waiting for `metadataCache`!
 
-2. **[ ] Not started. Never let an unnumbered same-note `[[#^id]]` collapse to empty text in Live Preview (`src/render/live-preview/reference-links.ts`):**
+2. **[x] Done (shows `#^id`). Never let an unnumbered same-note `[[#^id]]` collapse to empty text in Live Preview (`src/render/live-preview/reference-links.ts`):**
    - If `link.path === ""` and `label` is still `undefined` (for example, `^id` points to a non-existent equation or an equation with `\notag`), Obsidian's built-in Live Preview widget would render `[[#^id]]` as `""` (invisible!).
    - Emit a fallback `ReferenceWidget` showing `(#^${link.id})` or `[[#^${link.id}]]` (or keep it visible) so a broken/unnumbered same-note block link never disappears into empty text when the cursor leaves the link.
 
@@ -61,10 +61,12 @@ When another plugin (such as `obsidian-uncommited`'s per-change **Restore**) res
 
 1. [x] `Compute same-note equation labels from the live editor buffer when the metadata cache is behind` (`src/render/live-preview/reference-links.ts`, `src/render/live-preview/equation-numbers.ts`, `test/core.test.ts`).
 
+2. [x] `Show unnumbered same-note block links as their link text in Live Preview` (`src/core/links.ts`, `src/render/live-preview/reference-links.ts`, `test/core.test.ts`).
+
 ## Verification
 
 - `npm test`, `npm run lint`, `npm run build`.
 
 ## Open questions for the owner
 
-1. When a same-note block link `[[#^foo]]` does **not** point to any numbered equation (e.g. a link to a regular paragraph block `^foo`, or to an equation with `\notag`), Obsidian's own Live Preview renders `[[#^foo]]` as empty text unless aliased. Should Equation Refs leave non-equation `[[#^foo]]` links to Obsidian as it does today (`if (!label) continue`), and only use the live-document `scanMathBlocks` fallback for equations? (Recommended: yes, only touch links whose target is a math block in `scanMathBlocks` or `EquationNumbers`, so non-equation block links are never altered.)
+1. Decided 2026-11-21: the owner chose to always show `#^id` for unnumbered same-note links, including non-equation blocks. Original question: When a same-note block link `[[#^foo]]` does **not** point to any numbered equation (e.g. a link to a regular paragraph block `^foo`, or to an equation with `\notag`), Obsidian's own Live Preview renders `[[#^foo]]` as empty text unless aliased. Should Equation Refs leave non-equation `[[#^foo]]` links to Obsidian as it does today (`if (!label) continue`), and only use the live-document `scanMathBlocks` fallback for equations? (Recommended: yes, only touch links whose target is a math block in `scanMathBlocks` or `EquationNumbers`, so non-equation block links are never altered.)

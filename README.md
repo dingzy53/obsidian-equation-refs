@@ -65,6 +65,7 @@ In Live Preview, a reference shows its number until you move the cursor into it.
 - Numbers are 1, 2, 3, … in document order, counting only numbered equations. The count restarts in each note.
 - `\tag{x}` is respected. References show `(x)`, and the equation doesn't use up a number.
 - `\notag` or `\nonumber` keeps an equation unnumbered even if it is linked.
+- In Live Preview, a same-note `[[#^id]]` with no equation number shows as `#^id` instead of blank text.
 - Adding or removing a link anywhere updates the numbers in open notes automatically.
 
 ## Settings
