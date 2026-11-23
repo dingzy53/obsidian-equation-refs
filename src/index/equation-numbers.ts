@@ -1,4 +1,5 @@
 import { App, CachedMetadata, Component, EventRef, Events, TFile, debounce } from 'obsidian';
+import { normalizeEquationTex } from '../core/math-source';
 import { EquationLabel, numberEquations, sameLabels } from '../core/numbering';
 import { ReferenceIndex } from './reference-index';
 
@@ -16,6 +17,8 @@ export class EquationNumbers extends Component {
 	private labels = new Map<string, Map<string, EquationLabel>>();
 	/** Block IDs of the display equations of numbered notes, in document order (null when unlabelled). */
 	private order = new Map<string, (string | null)[]>();
+	/** Normalized TeX by block ID for numbered equations, used to match block hover popovers. */
+	private texById = new Map<string, Map<string, string>>();
 	/** Guards against out-of-order async recomputes of the same note. */
 	private generation = new Map<string, number>();
 	private readonly scheduleRebuild = debounce(() => void this.rebuild(), 500, true);
@@ -65,6 +68,24 @@ export class EquationNumbers extends Component {
 		return this.order.get(path);
 	}
 
+	/** Normalized TeX of a numbered equation, if known. */
+	equationTex(path: string, id: string): string | undefined {
+		return this.texById.get(path)?.get(id);
+	}
+
+	/** Block ID of the single numbered equation in `path` whose normalized TeX equals `tex`, or null. */
+	findUniqueIdByTex(path: string, tex: string): string | null {
+		const map = this.texById.get(path);
+		if (!map) return null;
+		let match: string | null = null;
+		for (const [id, candidate] of map) {
+			if (candidate !== tex) continue;
+			if (match !== null) return null;
+			match = id;
+		}
+		return match;
+	}
+
 	/** `callback(path)` runs when the numbers of `path` change; `path` is null when everything should refresh. */
 	onChange(callback: (path: string | null) => void): EventRef {
 		return this.events.on('changed', callback as (...data: unknown[]) => unknown);
@@ -100,6 +121,7 @@ export class EquationNumbers extends Component {
 	private onDeleted(path: string): void {
 		this.generation.delete(path);
 		this.order.delete(path);
+		this.texById.delete(path);
 		if (this.labels.delete(path)) this.events.trigger('changed', path);
 		for (const target of this.refs.removeSource(path)) void this.recompute(target);
 	}
@@ -110,6 +132,7 @@ export class EquationNumbers extends Component {
 
 		let next: Map<string, EquationLabel> | undefined;
 		let ids: (string | null)[] = [];
+		const texMap = new Map<string, string>();
 		const file = this.app.vault.getFileByPath(path);
 		if (file && this.refs.hasReferences(path)) {
 			try {
@@ -124,6 +147,9 @@ export class EquationNumbers extends Component {
 						.map((s) => ({ id: s.id, tex: s.text }));
 					next = numberEquations(equations, (id) => this.refs.isReferenced(path, id));
 					ids = equations.map((e) => e.id ?? null);
+					for (const eq of equations) {
+						if (eq.id && next.has(eq.id)) texMap.set(eq.id, normalizeEquationTex(eq.tex));
+					}
 				}
 			} catch (err) {
 				console.error(`Equation Refs: failed to number equations in ${path}`, err);
@@ -135,9 +161,11 @@ export class EquationNumbers extends Component {
 		if (next?.size) {
 			this.labels.set(path, next);
 			this.order.set(path, ids);
+			this.texById.set(path, texMap);
 		} else {
 			this.labels.delete(path);
 			this.order.delete(path);
+			this.texById.delete(path);
 		}
 		if (!sameLabels(prev, next)) this.events.trigger('changed', path);
 	}

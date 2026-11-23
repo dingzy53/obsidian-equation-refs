@@ -5,7 +5,7 @@
  */
 
 import { syntaxTree } from '@codemirror/language';
-import { EditorState, RangeSetBuilder, StateEffect } from '@codemirror/state';
+import { EditorState, Extension, Prec, RangeSetBuilder, StateEffect } from '@codemirror/state';
 import { Decoration, DecorationSet, EditorView, PluginValue, ViewPlugin, ViewUpdate, WidgetType } from '@codemirror/view';
 import { EventRef, HoverParent, Keymap, editorInfoField, editorLivePreviewField } from 'obsidian';
 import { HOVER_SOURCE } from '../../constants';
@@ -15,10 +15,12 @@ import { labelInDoc } from './live-labels';
 
 const refresh = StateEffect.define<null>();
 
-export function referenceLinksInEditor(plugin: EquationRefsPlugin): ViewPlugin<ReferenceLinksView> {
-	return ViewPlugin.define((view) => new ReferenceLinksView(view, plugin), {
-		decorations: (value) => value.decorations,
-	});
+export function referenceLinksInEditor(plugin: EquationRefsPlugin): Extension {
+	return Prec.high(
+		ViewPlugin.define((view) => new ReferenceLinksView(view, plugin), {
+			decorations: (value) => value.decorations,
+		}),
+	);
 }
 
 class ReferenceLinksView implements PluginValue {

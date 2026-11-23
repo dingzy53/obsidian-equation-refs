@@ -147,3 +147,28 @@ export function stripTexComments(tex: string): string {
 		})
 		.join('\n');
 }
+
+/** Normalize display math source (with or without `$$ … $$` / trailing `^id`) for matching. */
+export function normalizeEquationTex(raw: string): string {
+	let body = raw.trim();
+	if (body.startsWith('$$')) {
+		body = body.slice(2).replace(/\$\$(?:\s*\^[A-Za-z0-9-]+)?\s*$/, '');
+	}
+	return body.replace(/\s+/g, ' ').trim();
+}
+
+/** Resolve the block ID for a rendered block inside a hover popover. */
+export function resolveHoverEquationId(
+	hoveredId: string | null,
+	hoveredTex: string | undefined,
+	sectionTex: string | null,
+	uniqueByTex: string | null,
+): string | null {
+	if (hoveredId) {
+		if (sectionTex !== null && hoveredTex !== undefined && hoveredTex !== sectionTex) {
+			return uniqueByTex;
+		}
+		return hoveredId;
+	}
+	return sectionTex !== null ? uniqueByTex : null;
+}

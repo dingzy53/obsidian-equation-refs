@@ -1,5 +1,15 @@
+import { ChangeSet, EditorState, Prec, RangeSet, RangeSetBuilder, StateEffect, StateField } from '@codemirror/state';
+import { Decoration, type DecorationSet, EditorView, WidgetType } from '@codemirror/view';
 import { describe, expect, it } from 'vitest';
-import { blockAtLine, classifyEquation, linesOf, scanMathBlocks, stripTexComments } from '../src/core/math-source';
+import {
+	blockAtLine,
+	classifyEquation,
+	linesOf,
+	normalizeEquationTex,
+	resolveHoverEquationId,
+	scanMathBlocks,
+	stripTexComments,
+} from '../src/core/math-source';
 import { numberEquations, sameLabels } from '../src/core/numbering';
 import { blockIdFromSubpath, findBlockLinks, unnumberedLinkText } from '../src/core/links';
 import { formatReference, validateTemplate } from '../src/core/format';
@@ -192,5 +202,125 @@ describe('pending reading-view math helpers', () => {
 		expect(shouldAttachPendingMath(1, 2, false)).toBe(false);
 		expect(shouldAttachPendingMath(2, 2, false)).toBe(true);
 		expect(shouldAttachPendingMath(1, 2, true)).toBe(true);
+	});
+});
+
+describe('hover popover TeX helpers', () => {
+	it('normalizes display math blocks with or without delimiters and block IDs', () => {
+		expect(normalizeEquationTex('$$\na = b +\n  c\n$$')).toBe('a = b + c');
+		expect(normalizeEquationTex('$$ x^2 $$ ^sq')).toBe('x^2');
+		expect(normalizeEquationTex('  a = b +\n  c  ')).toBe('a = b + c');
+	});
+
+	it('resolves hovered block IDs and falls back to unique TeX matches', () => {
+		expect(resolveHoverEquationId('gauss', 'a = b', 'a = b', 'gauss')).toBe('gauss');
+		// Mismatched TeX falls back to unique TeX match
+		expect(resolveHoverEquationId('other', 'c = d', 'a = b', 'gauss')).toBe('gauss');
+		// Ambiguous TeX returns null when hovered ID doesn't match
+		expect(resolveHoverEquationId('other', 'c = d', 'a = b', null)).toBeNull();
+		// Missing hovered ID falls back to unique TeX
+		expect(resolveHoverEquationId(null, undefined, 'a = b', 'gauss')).toBe('gauss');
+		expect(resolveHoverEquationId(null, undefined, null, 'gauss')).toBeNull();
+	});
+});
+
+describe('live preview widget precedence (BUG-01)', () => {
+	class TextWidget extends WidgetType {
+		constructor(readonly label: string) {
+			super();
+		}
+
+		eq(other: TextWidget): boolean {
+			return other.label === this.label;
+		}
+
+		toDOM(): HTMLElement {
+			return createSpan();
+		}
+	}
+
+	it('emits updated replacement widgets without splitting over Obsidian delimiter replacements', () => {
+		const doc = 'See [[#^faraday]] here.';
+		const start = doc.indexOf('[[#^faraday]]');
+		const end = start + '[[#^faraday]]'.length;
+		const setLabel = StateEffect.define<string>();
+
+		// Simulate Obsidian's default-precedence delimiter replacement `[[#` + `]]`.
+		const obsField = StateField.define<DecorationSet>({
+			create() {
+				const b = new RangeSetBuilder<Decoration>();
+				b.add(start, start + 3, Decoration.replace({}));
+				b.add(end - 2, end, Decoration.replace({}));
+				return b.finish();
+			},
+			update(value) {
+				return value;
+			},
+		});
+
+		const eqField = StateField.define<DecorationSet>({
+			create() {
+				const b = new RangeSetBuilder<Decoration>();
+				b.add(start, end, Decoration.replace({ widget: new TextWidget('(2)') }));
+				return b.finish();
+			},
+			update(value, tr) {
+				for (const e of tr.effects) {
+					if (e.is(setLabel)) {
+						const b = new RangeSetBuilder<Decoration>();
+						b.add(start, end, Decoration.replace({ widget: new TextWidget(e.value) }));
+						return b.finish();
+					}
+				}
+				return value;
+			},
+		});
+
+		const obsExt = EditorView.decorations.from(obsField);
+		const eqExt = Prec.high(EditorView.decorations.from(eqField));
+		const state1 = EditorState.create({
+			doc,
+			extensions: [obsField, obsExt, eqField, eqExt],
+		});
+		const state2 = state1.update({ effects: setLabel.of('(3)') }).state;
+		const sets1 = state1.facet(EditorView.decorations).map((s) => (typeof s === 'function' ? Decoration.none : s));
+		const sets2 = state2.facet(EditorView.decorations).map((s) => (typeof s === 'function' ? Decoration.none : s));
+		expect(sets1[0]).toBe(state1.field(eqField));
+
+		// High-precedence eqField must appear before obsField in facet order:
+		// comparing sets1 vs sets2 must report the full [start, end] range, not [start+3, end].
+		const changedRanges: Array<[number, number]> = [];
+		RangeSet.compare(
+			sets1,
+			sets2,
+			ChangeSet.empty(doc.length),
+			{
+				compareRange() {},
+				comparePoint(from: number, to: number) {
+					changedRanges.push([from, to]);
+				},
+			},
+		);
+		expect(changedRanges).toEqual([[start, end]]);
+
+		const updatedDeco = Decoration.replace({ widget: new TextWidget('(3)') });
+		const emitted: Array<{ from: number; to: number; openStart: number; isUpdated: boolean }> = [];
+		RangeSet.spans(
+			sets2,
+			start,
+			end,
+			{
+				span() {},
+				point(from: number, to: number, value: Decoration, _active, openStart: number) {
+					emitted.push({
+						from,
+						to,
+						openStart,
+						isUpdated: value.eq(updatedDeco),
+					});
+				},
+			},
+		);
+		expect(emitted).toEqual([{ from: start, to: end, openStart: 0, isUpdated: true }]);
 	});
 });

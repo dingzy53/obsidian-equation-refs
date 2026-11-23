@@ -6,7 +6,7 @@
 import { MarkdownPostProcessor, MarkdownPostProcessorContext, MarkdownRenderChild, TFile, loadMathJax, parseLinktext } from 'obsidian';
 import type { Restorable } from '../constants';
 import { blockIdFromSubpath } from '../core/links';
-import { linesOf, scanMathBlocks } from '../core/math-source';
+import { linesOf, normalizeEquationTex, resolveHoverEquationId, scanMathBlocks } from '../core/math-source';
 import { expectedDisplayMathCount, shouldAttachPendingMath } from '../core/pending-math';
 import type EquationRefsPlugin from '../main';
 import { DISPLAY_MATH, DISPLAY_MATH_PLACEHOLDER, setEquationNumber } from './dom';
@@ -38,11 +38,19 @@ function attachEquationNumbers(
 	mathEls: HTMLElement[],
 	owner: ChildOwner,
 	fallbackTargets?: (EquationTarget | null)[],
+	fallbackTexs?: string[],
 ): void {
-	const targets = equationTargets(plugin, el, ctx, mathEls.length, fallbackTargets);
+	const info = ctx.getSectionInfo(el);
+	const blocks = info ? scanMathBlocks(linesOf(info.text), info.lineStart, info.lineEnd) : null;
+	const targets = equationTargets(plugin, el, ctx, mathEls.length, blocks, fallbackTargets);
+	const sectionTexs = blocks?.length === mathEls.length
+		? blocks.map((b) => normalizeEquationTex(b.tex))
+		: fallbackTexs?.length === mathEls.length
+			? fallbackTexs
+			: [];
 	mathEls.forEach((mathEl, i) => {
 		// Apply synchronously as well, so that PDF export picks the number up right away.
-		const child = new EquationNumberChild(mathEl, plugin, targets[i] ?? null);
+		const child = new EquationNumberChild(mathEl, plugin, ctx.sourcePath, targets[i] ?? null, sectionTexs[i] ?? null);
 		child.apply();
 		owner.addChild(child);
 	});
@@ -62,7 +70,8 @@ function numberEquations(plugin: EquationRefsPlugin, el: HTMLElement, ctx: Markd
 	if (!expectedCount) return;
 
 	const fallbackTargets = blocks?.map((b) => (b.id ? { path: ctx.sourcePath, id: b.id } : null));
-	ctx.addChild(new PendingMathChild(el, plugin, ctx, expectedCount, fallbackTargets));
+	const fallbackTexs = blocks?.map((b) => normalizeEquationTex(b.tex));
+	ctx.addChild(new PendingMathChild(el, plugin, ctx, expectedCount, fallbackTargets, fallbackTexs));
 }
 
 /** Math inside quotes, callouts, lists, tables or nested embeds is not a top-level equation. */
@@ -79,14 +88,13 @@ function equationTargets(
 	el: HTMLElement,
 	ctx: MarkdownPostProcessorContext,
 	count: number,
+	blocks: ReturnType<typeof scanMathBlocks> | null,
 	fallbackTargets?: (EquationTarget | null)[],
 ): (EquationTarget | null)[] {
 	const path = ctx.sourcePath;
 
 	// Normal case: read the IDs from the section's own source.
-	const info = ctx.getSectionInfo(el);
-	if (info) {
-		const blocks = scanMathBlocks(linesOf(info.text), info.lineStart, info.lineEnd);
+	if (blocks) {
 		if (blocks.length === count) return blocks.map((b) => (b.id ? { path, id: b.id } : null));
 	} else if (fallbackTargets?.length === count) {
 		return fallbackTargets;
@@ -94,7 +102,7 @@ function equationTargets(
 
 	// Whole document at once (PDF export): match equations to the note's math sections by order.
 	const isPdfExport = el.parentElement?.hasClass('print') ?? false;
-	if (info && !isPdfExport) return [];
+	if (blocks && !isPdfExport) return [];
 	const ids = plugin.numbers.equationIds(path);
 	if (ids?.length === count) return ids.map((id) => (id ? { path, id } : null));
 
@@ -112,6 +120,7 @@ class PendingMathChild extends MarkdownRenderChild implements Restorable {
 		private readonly ctx: MarkdownPostProcessorContext,
 		private readonly expectedCount: number,
 		private readonly fallbackTargets?: (EquationTarget | null)[],
+		private readonly fallbackTexs?: string[],
 	) {
 		super(containerEl);
 	}
@@ -171,7 +180,7 @@ class PendingMathChild extends MarkdownRenderChild implements Restorable {
 		if (!shouldAttachPendingMath(mathEls.length, this.expectedCount, allowPartial)) return false;
 
 		this.stop();
-		attachEquationNumbers(this.plugin, this.containerEl, this.ctx, mathEls, this, this.fallbackTargets);
+		attachEquationNumbers(this.plugin, this.containerEl, this.ctx, mathEls, this, this.fallbackTargets, this.fallbackTexs);
 		return true;
 	}
 }
@@ -186,10 +195,14 @@ function embedTarget(plugin: EquationRefsPlugin, el: HTMLElement, sourcePath: st
 }
 
 class EquationNumberChild extends MarkdownRenderChild implements Restorable {
+	private unloaded = false;
+
 	constructor(
 		containerEl: HTMLElement,
 		private readonly plugin: EquationRefsPlugin,
+		private readonly sourcePath: string,
 		private readonly fromSection: EquationTarget | null,
+		private readonly sectionTex: string | null,
 	) {
 		super(containerEl);
 	}
@@ -201,10 +214,13 @@ class EquationNumberChild extends MarkdownRenderChild implements Restorable {
 		});
 		this.register(() => this.plugin.numbers.offref(ref));
 		// Embeds are only attached to the document after post-processing; look again then.
-		window.requestAnimationFrame(() => this.apply());
+		window.requestAnimationFrame(() => {
+			if (!this.unloaded) this.apply();
+		});
 	}
 
 	onunload(): void {
+		this.unloaded = true;
 		this.plugin.rendered.delete(this);
 	}
 
@@ -218,12 +234,22 @@ class EquationNumberChild extends MarkdownRenderChild implements Restorable {
 	}
 
 	private target(): EquationTarget | null {
-		const embed = embedTarget(this.plugin, this.containerEl, this.fromSection?.path ?? '');
+		const embed = embedTarget(this.plugin, this.containerEl, this.sourcePath);
 		if (embed) {
 			const id = embed.id ?? this.fromSection?.id;
 			return id ? { path: embed.file.path, id } : null;
 		}
-		return this.fromSection;
+		if (this.fromSection) return this.fromSection;
+		if (this.containerEl.closest('.hover-popover') && this.containerEl.closest('.markdown-embed[data-type="block"]')) {
+			const hoveredId = this.plugin.hoveredBlockFor(this.sourcePath);
+			const hoveredTex = hoveredId ? this.plugin.numbers.equationTex(this.sourcePath, hoveredId) : undefined;
+			const uniqueByTex = this.sectionTex !== null
+				? this.plugin.numbers.findUniqueIdByTex(this.sourcePath, this.sectionTex)
+				: null;
+			const id = resolveHoverEquationId(hoveredId, hoveredTex, this.sectionTex, uniqueByTex);
+			return id ? { path: this.sourcePath, id } : null;
+		}
+		return null;
 	}
 }
 
