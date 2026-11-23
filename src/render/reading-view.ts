@@ -3,16 +3,21 @@
  * and show unaliased links to them as their numbers.
  */
 
-import { MarkdownPostProcessor, MarkdownPostProcessorContext, MarkdownRenderChild, TFile, parseLinktext } from 'obsidian';
+import { MarkdownPostProcessor, MarkdownPostProcessorContext, MarkdownRenderChild, TFile, loadMathJax, parseLinktext } from 'obsidian';
 import type { Restorable } from '../constants';
 import { blockIdFromSubpath } from '../core/links';
 import { linesOf, scanMathBlocks } from '../core/math-source';
+import { expectedDisplayMathCount, shouldAttachPendingMath } from '../core/pending-math';
 import type EquationRefsPlugin from '../main';
-import { DISPLAY_MATH, setEquationNumber } from './dom';
+import { DISPLAY_MATH, DISPLAY_MATH_PLACEHOLDER, setEquationNumber } from './dom';
 
 interface EquationTarget {
 	path: string;
 	id: string;
+}
+
+interface ChildOwner {
+	addChild(child: MarkdownRenderChild): void;
 }
 
 export function createReadingViewProcessor(plugin: EquationRefsPlugin): MarkdownPostProcessor {
@@ -22,17 +27,42 @@ export function createReadingViewProcessor(plugin: EquationRefsPlugin): Markdown
 	};
 }
 
-function numberEquations(plugin: EquationRefsPlugin, el: HTMLElement, ctx: MarkdownPostProcessorContext): void {
-	const mathEls = Array.from(el.querySelectorAll<HTMLElement>(DISPLAY_MATH)).filter((m) => !isNested(m, el));
-	if (!mathEls.length) return;
+function topLevelDisplayMath(el: HTMLElement): HTMLElement[] {
+	return Array.from(el.querySelectorAll<HTMLElement>(DISPLAY_MATH)).filter((m) => !isNested(m, el));
+}
 
-	const targets = equationTargets(plugin, el, ctx, mathEls.length);
+function attachEquationNumbers(
+	plugin: EquationRefsPlugin,
+	el: HTMLElement,
+	ctx: MarkdownPostProcessorContext,
+	mathEls: HTMLElement[],
+	owner: ChildOwner,
+	fallbackTargets?: (EquationTarget | null)[],
+): void {
+	const targets = equationTargets(plugin, el, ctx, mathEls.length, fallbackTargets);
 	mathEls.forEach((mathEl, i) => {
 		// Apply synchronously as well, so that PDF export picks the number up right away.
 		const child = new EquationNumberChild(mathEl, plugin, targets[i] ?? null);
 		child.apply();
-		ctx.addChild(child);
+		owner.addChild(child);
 	});
+}
+
+function numberEquations(plugin: EquationRefsPlugin, el: HTMLElement, ctx: MarkdownPostProcessorContext): void {
+	const mathEls = topLevelDisplayMath(el);
+	if (mathEls.length) {
+		attachEquationNumbers(plugin, el, ctx, mathEls, ctx);
+		return;
+	}
+
+	const info = ctx.getSectionInfo(el);
+	const blocks = info ? scanMathBlocks(linesOf(info.text), info.lineStart, info.lineEnd) : null;
+	const placeholders = Array.from(el.querySelectorAll<HTMLElement>(DISPLAY_MATH_PLACEHOLDER)).filter((m) => !isNested(m, el));
+	const expectedCount = expectedDisplayMathCount(blocks?.length ?? null, placeholders.length);
+	if (!expectedCount) return;
+
+	const fallbackTargets = blocks?.map((b) => (b.id ? { path: ctx.sourcePath, id: b.id } : null));
+	ctx.addChild(new PendingMathChild(el, plugin, ctx, expectedCount, fallbackTargets));
 }
 
 /** Math inside quotes, callouts, lists, tables or nested embeds is not a top-level equation. */
@@ -49,6 +79,7 @@ function equationTargets(
 	el: HTMLElement,
 	ctx: MarkdownPostProcessorContext,
 	count: number,
+	fallbackTargets?: (EquationTarget | null)[],
 ): (EquationTarget | null)[] {
 	const path = ctx.sourcePath;
 
@@ -57,6 +88,8 @@ function equationTargets(
 	if (info) {
 		const blocks = scanMathBlocks(linesOf(info.text), info.lineStart, info.lineEnd);
 		if (blocks.length === count) return blocks.map((b) => (b.id ? { path, id: b.id } : null));
+	} else if (fallbackTargets?.length === count) {
+		return fallbackTargets;
 	}
 
 	// Whole document at once (PDF export): match equations to the note's math sections by order.
@@ -66,6 +99,81 @@ function equationTargets(
 	if (ids?.length === count) return ids.map((id) => (id ? { path, id } : null));
 
 	return [];
+}
+
+class PendingMathChild extends MarkdownRenderChild implements Restorable {
+	private observer: MutationObserver | null = null;
+	private rafId: number | null = null;
+	private stopped = false;
+
+	constructor(
+		containerEl: HTMLElement,
+		private readonly plugin: EquationRefsPlugin,
+		private readonly ctx: MarkdownPostProcessorContext,
+		private readonly expectedCount: number,
+		private readonly fallbackTargets?: (EquationTarget | null)[],
+	) {
+		super(containerEl);
+	}
+
+	onload(): void {
+		this.plugin.rendered.add(this);
+		if (this.tryAttach(false)) return;
+
+		this.observer = new MutationObserver(() => {
+			this.tryAttach(false);
+		});
+		this.observer.observe(this.containerEl, { childList: true, subtree: true });
+		void this.waitForMathJax();
+	}
+
+	onunload(): void {
+		this.stop();
+	}
+
+	restore(): void {
+		this.stop();
+	}
+
+	private stop(): void {
+		this.stopped = true;
+		if (this.observer) {
+			this.observer.disconnect();
+			this.observer = null;
+		}
+		if (this.rafId !== null) {
+			window.cancelAnimationFrame(this.rafId);
+			this.rafId = null;
+		}
+		this.plugin.rendered.delete(this);
+	}
+
+	private async waitForMathJax(): Promise<void> {
+		try {
+			await loadMathJax();
+		} catch {
+			return;
+		}
+		if (this.stopped || this.tryAttach(false)) return;
+		this.rafId = window.requestAnimationFrame(() => {
+			this.rafId = null;
+			if (this.stopped || this.tryAttach(false)) return;
+			this.rafId = window.requestAnimationFrame(() => {
+				this.rafId = null;
+				if (!this.stopped) this.tryAttach(true);
+			});
+		});
+	}
+
+	private tryAttach(allowPartial: boolean): boolean {
+		if (this.stopped) return true;
+		const mathEls = topLevelDisplayMath(this.containerEl);
+		if (!shouldAttachPendingMath(mathEls.length, this.expectedCount, allowPartial)) return false;
+
+		this.stop();
+		attachEquationNumbers(this.plugin, this.containerEl, this.ctx, mathEls, this, this.fallbackTargets);
+		return true;
+	}
 }
 
 /** If `el` is inside an embed such as `![[Note#^id]]`, the note and block it shows. */

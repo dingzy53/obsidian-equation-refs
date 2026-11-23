@@ -1,6 +1,6 @@
 # PLAN: fix cold-boot MathJax startup race in Reading view
 
-> Branch: `fix/cold-boot-mathjax-race` (from `main`) · Date: 2026-11-23 · Status: Planned (not yet implemented).
+> Branch: `fix/cold-boot-mathjax-race` (from `main`) · Date: 2026-11-23 · Status: Implemented and verified.
 >
 > The previous `fix/blank-ref-after-external-change` plan is completed and shipped on `main` (available in git history).
 
@@ -47,8 +47,8 @@ When a note containing display equations (for example, `test-vault/Maxwell.md`) 
 
 ## Order of Work
 
-1. `[ ]` Update `src/render/reading-view.ts` to detect pending display-math sections when `DISPLAY_MATH` is not yet present and attach `EquationNumberChild` instances once MathJax finishes rendering into `el` (with clean observer teardown on `onunload()`).
-2. `[ ]` Add unit tests in `test/core.test.ts` for any extracted pure matching helper, and add a cold-boot E2E test in `test/e2e/equation-refs.e2e.ts` (once merged with `feat/e2e-testing`) that opens `Maxwell.md` in Reading view **without** pre-calling `obsidian.loadMathJax()` and asserts `['(1)', '(2)', '(3)']` appear automatically.
+1. `[x]` Update `src/render/reading-view.ts` to detect pending display-math sections when `DISPLAY_MATH` is not yet present and attach `EquationNumberChild` instances once MathJax finishes rendering into `el` (with clean observer teardown on `onunload()`).
+2. `[x]` Add unit tests in `test/core.test.ts` for extracted pure helpers (`src/core/pending-math.ts`), and verify cold-boot Reading view numbering against `feat/e2e-testing`'s E2E suite in a temporary worktree **without** pre-calling `obsidian.loadMathJax()` (confirmed `['(1)', '(2)', '(3)']` appear automatically on both `darwin` desktop and `emulate-mobile`, plus clean teardown on plugin disable; `feat/e2e-testing` left untouched).
 
 ## Verification Plan
 

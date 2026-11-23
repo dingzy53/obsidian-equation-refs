@@ -4,6 +4,7 @@ import { numberEquations, sameLabels } from '../src/core/numbering';
 import { blockIdFromSubpath, findBlockLinks, unnumberedLinkText } from '../src/core/links';
 import { formatReference, validateTemplate } from '../src/core/format';
 import { numberNoteEquations, readNoteEquations } from '../src/core/live-numbering';
+import { expectedDisplayMathCount, shouldAttachPendingMath } from '../src/core/pending-math';
 
 describe('scanMathBlocks', () => {
 	it('finds multi-line blocks with an ID on the next line', () => {
@@ -172,5 +173,24 @@ describe('unnumberedLinkText', () => {
 	it('leaves links to other notes to Obsidian', () => {
 		const [link] = findBlockLinks('See [[Other#^para]].');
 		expect(link && unnumberedLinkText(link)).toBeNull();
+	});
+});
+
+describe('pending reading-view math helpers', () => {
+	it('computes expected display math count from source blocks or placeholders', () => {
+		expect(expectedDisplayMathCount(3, 0)).toBe(3);
+		expect(expectedDisplayMathCount(2, 1)).toBe(2);
+		expect(expectedDisplayMathCount(0, 2)).toBe(2);
+		expect(expectedDisplayMathCount(null, 2)).toBe(2);
+		expect(expectedDisplayMathCount(0, 0)).toBe(0);
+		expect(expectedDisplayMathCount(null, -3)).toBe(0);
+	});
+
+	it('waits for all expected equations unless partial attachment is allowed', () => {
+		expect(shouldAttachPendingMath(0, 2, false)).toBe(false);
+		expect(shouldAttachPendingMath(0, 2, true)).toBe(false);
+		expect(shouldAttachPendingMath(1, 2, false)).toBe(false);
+		expect(shouldAttachPendingMath(2, 2, false)).toBe(true);
+		expect(shouldAttachPendingMath(1, 2, true)).toBe(true);
 	});
 });
