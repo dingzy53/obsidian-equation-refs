@@ -1,58 +1,39 @@
-# PLAN: fix cold-boot MathJax startup race in Reading view
+# PLAN: QA audit fixes (equation-refs)
 
-> Branch: `fix/cold-boot-mathjax-race` (from `main`) · Date: 2026-11-23 · Status: Implemented and verified.
+> Branch: `fix/qa-audit-fixes` (from `fix/cold-boot-mathjax-race`) · Date: 2026-11-24 · Status: Implemented and verified.
 >
-> The previous `fix/blank-ref-after-external-change` plan is completed and shipped on `main` (available in git history).
+> The previous `fix/cold-boot-mathjax-race` plan is preserved in git history.
 
-## Context & Symptom
+## Context & Findings
 
-Discovered during real-Obsidian WebdriverIO E2E testing on Obsidian `v1.15.1` (both desktop `darwin` and `emulate-mobile`).
+From `/Users/ding/GitHub/OBSIDIAN_PLUGINS_QA_REPORT.md`:
 
-When a note containing display equations (for example, `test-vault/Maxwell.md`) is opened in Reading view immediately after a cold Obsidian launch—before Obsidian finishes lazy-loading MathJax—all display equations remain **unnumbered**:
+1. **BUG-01 (P1)**: Live Preview equation links go blank after renumbering or a format change (`Same-note reference format` -> `Eq. {n}`). Links whose text did not change remain visible; links whose text changed render as empty text until the note is closed and reopened.
+2. **BUG-09 (P3)**: Ctrl/Cmd-hover popover over `Maxwell (1)` shows the equation without its `(1)` number, although inline embeds (`![[Maxwell#^gauss]]`) show it.
 
-- `plugin.numbers` already has the computed labels (e.g. `gauss -> { text: "1", tagged: false }`).
-- In-note reference links (`[[#^faraday]]`, `[[#^gauss]]`, `[[#^lorentz]]`) still format properly as `(2)`, `(1)`, `(3)` with `.eqref-link`.
-- However, all `7` display equations in `Maxwell.md` render into `<mjx-container class="MathJax" display="true">`, yet **0** receive `.eqref-numbered` / `data-eq-number` (`plugin.rendered.size === 3`, containing only the 3 `ReferenceLinkChild` instances and zero `EquationNumberChild` instances).
-- Opening a second math note or switching views afterward works because MathJax is already loaded by then.
+## Verified Root Causes & Fix Design
 
-## Verified Root Cause (`src/render/reading-view.ts` & `src/render/dom.ts`)
+### 1. Live Preview blank links after renumber / format change (`src/render/live-preview/reference-links.ts`)
+- Obsidian's built-in Live Preview formatting plugin (`Yoe`) runs at default precedence before `editorExtensions` and emits `Decoration.replace` (`Qoe`, empty `<span>`) over the `[[#` opener (`[start, start+3]`).
+- When `ReferenceLinksView` rebuilds decorations via `refresh` without `docChanged`, `RangeSet.compare` treats `[start, start+3]` as unchanged and emits only `[start+3, end]`. CodeMirror's `RangeSet.spans` sees `pointFrom < from` (`openStart > active.length`), calls `TileUpdate.continueWidget()`, extends `Qoe`'s empty `<span>`, and drops `ReferenceWidget`.
+- **Fix**: Wrap `ViewPlugin.define(...)` in `Prec.high(...)` in `referenceLinksInEditor()` so `ReferenceWidget` takes precedence over `Yoe` and owns the full `[start, end]` range directly.
 
-1. `createReadingViewProcessor` (`src/render/reading-view.ts:18-23`) runs `numberEquations(plugin, el, ctx)` synchronously inside Obsidian's `MarkdownPostProcessor`:
-   ```ts
-   function numberEquations(plugin: EquationRefsPlugin, el: HTMLElement, ctx: MarkdownPostProcessorContext): void {
-   	const mathEls = Array.from(el.querySelectorAll<HTMLElement>(DISPLAY_MATH)).filter((m) => !isNested(m, el));
-   	if (!mathEls.length) return;
-   ```
-   where `DISPLAY_MATH` (`src/render/dom.ts:3`) is `'mjx-container.MathJax[display="true"]'`.
-2. On a cold Obsidian boot, MathJax is lazy-loaded asynchronously when the first math note opens. Obsidian runs `MarkdownPostProcessor` on `el` while the section only contains math placeholder elements (before `<mjx-container class="MathJax" display="true">` has been inserted into the DOM).
-3. Because `mathEls.length === 0`, `numberEquations` returns early without registering any `EquationNumberChild` on `ctx`.
-4. When Obsidian finishes loading MathJax and inserts `<mjx-container class="MathJax" display="true">` asynchronously afterward, nothing re-invokes `numberEquations` for that section, and subsequent `plugin.numbers.onChange` events have no `EquationNumberChild` registered to update.
-
-## Proposed Fix Design
-
-### 1. Deferred section attachment when display math is still loading (`src/render/reading-view.ts`)
-
-- Keep the fast synchronous path whenever `mathEls.length > 0` (so already-loaded MathJax and `.print` PDF export continue to attach and apply synchronously).
-- When `mathEls.length === 0`:
-  - Check whether the section is expected to contain top-level display math before doing any extra work:
-    - Either inspect `ctx.getSectionInfo(el)` with `scanMathBlocks(linesOf(info.text), info.lineStart, info.lineEnd)` (`blocks.length > 0`), and/or check for un-nested display-math placeholder elements in `el` (e.g. `.math.math-block` not matched by `isNested`).
-  - If top-level display math is pending, register a lightweight `MarkdownRenderChild` (`PendingMathChild`) on `ctx.addChild(...)`:
-    - Observe `el` (with a `MutationObserver` on `{ childList: true, subtree: true }`) and/or await `loadMathJax()` from `obsidian`.
-    - Once `DISPLAY_MATH` elements appear (or on microtask/animation frame after `loadMathJax()` resolves), disconnect the observer, run the normal `numberEquations` attachment (`EquationNumberChild` + `apply()`), and register those children on `ctx` / `this` so `onunload()` cleans everything up.
-    - Always disconnect the `MutationObserver` in `onunload()` so unmounting a section mid-load never leaks observers.
-
-### 2. Avoid eager startup cost (`src/main.ts`)
-
-- Do **not** call `loadMathJax()` in `Plugin.onload()`, so vaults without math notes pay zero startup overhead. Only trigger/await it inside a Reading view section that actually contains display math.
+### 2. Hover popover equation numbering & same-note embeds (`src/core/math-source.ts`, `src/index/equation-numbers.ts`, `src/main.ts`, `src/render/reading-view.ts`)
+- For multi-line `$$\n...\n$$\n^gauss`, Obsidian slices `block.position` (omitting `^gauss`) inside both inline embeds and block hover popovers.
+- Inline embeds recover via `.internal-embed[src]`, but `EquationNumberChild.target()` passed `this.fromSection?.path ?? ''`, breaking same-note multi-line embeds (`![[#^gauss]]`).
+- Hover popovers wrap the block in `.hover-popover .markdown-embed[data-type="block"]` with no `.internal-embed[src]`.
+- **Fix**:
+  - Pass `ctx.sourcePath` into `EquationNumberChild` (including via `PendingMathChild`) and use it in `embedTarget(...)`.
+  - Listen for `hover-link` on `app.workspace` in `EquationRefsPlugin` to track the hovered block ID per note path, and record normalized TeX per `(path, id)` in `EquationNumbers` for verification and unique-TeX fallback strictly inside `.hover-popover .markdown-embed[data-type="block"]`.
 
 ## Order of Work
 
-1. `[x]` Update `src/render/reading-view.ts` to detect pending display-math sections when `DISPLAY_MATH` is not yet present and attach `EquationNumberChild` instances once MathJax finishes rendering into `el` (with clean observer teardown on `onunload()`).
-2. `[x]` Add unit tests in `test/core.test.ts` for extracted pure helpers (`src/core/pending-math.ts`), and verify cold-boot Reading view numbering against `feat/e2e-testing`'s E2E suite in a temporary worktree **without** pre-calling `obsidian.loadMathJax()` (confirmed `['(1)', '(2)', '(3)']` appear automatically on both `darwin` desktop and `emulate-mobile`, plus clean teardown on plugin disable; `feat/e2e-testing` left untouched).
+1. `[x]` Wrap `ReferenceLinksView` in `Prec.high` (`src/render/live-preview/reference-links.ts`) and add a CodeMirror 6 regression test.
+2. `[x]` Add `normalizeEquationTex` / `resolveHoverEquationId` (`src/core/math-source.ts`), TeX index lookup (`src/index/equation-numbers.ts`), `hover-link` tracking (`src/main.ts`), and `EquationNumberChild` hover/same-note embed resolution (`src/render/reading-view.ts`), plus unit tests.
+3. `[x]` Run `npm run lint`, `npm test`, and `npm run build`, update status to verified, and push `fix/qa-audit-fixes`.
 
 ## Verification Plan
 
+- `npm run lint` (0 errors, 0 warnings)
+- `npm test` (Vitest unit tests including CM6 `Prec.high` and hover/TeX helpers)
 - `npm run build` (`tsc -noEmit -skipLibCheck && node esbuild.config.mjs production`)
-- `npm run lint` (`eslint-plugin-obsidianmd` + `manifest.json`)
-- `npm test` (Vitest unit tests)
-- Real-Obsidian E2E (`desktop` and `emulate-mobile`) verifying cold-boot Reading view numbering on `test-vault/Maxwell.md` without calling `obsidian.loadMathJax()` beforehand, plus plugin disable/unload check confirming no `.eqref-numbered` classes or observers remain.
