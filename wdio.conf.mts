@@ -9,7 +9,7 @@ const manifest = JSON.parse(readFileSync(path.resolve('manifest.json'), 'utf8'))
 const isDesktopOnly = Boolean(manifest.isDesktopOnly);
 
 // wdio-obsidian-service downloads and caches Obsidian binaries here.
-const cacheDir = path.resolve('.obsidian-cache');
+const cacheDir = path.resolve(env.OBSIDIAN_CACHE_DIR || '.obsidian-cache');
 const target = env.OBSIDIAN_E2E_TARGET ?? 'all'; // 'all' | 'desktop' | 'mobile'
 
 let defaultVersions = 'earliest/earliest latest/latest';

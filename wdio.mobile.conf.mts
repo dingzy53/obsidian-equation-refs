@@ -11,7 +11,7 @@ if (manifest.isDesktopOnly) {
 	console.warn('Warning: manifest.json has isDesktopOnly: true; Android E2E tests are skipped in CI.');
 }
 
-const cacheDir = path.resolve('.obsidian-cache');
+const cacheDir = path.resolve(env.OBSIDIAN_CACHE_DIR || '.obsidian-cache');
 const defaultVersions = 'earliest/earliest latest/latest';
 const versions = await parseObsidianVersions(
 	env.OBSIDIAN_MOBILE_VERSIONS ?? env.OBSIDIAN_VERSIONS ?? defaultVersions,
