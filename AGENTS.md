@@ -1,57 +1,38 @@
 # Agent & Testing Workflow Guide
 
-This repository uses a layered testing setup designed for fast AI-agent iteration locally and cross-platform verification in GitHub Actions.
+## Cross-Platform E2E Testing
 
-## Fast Local Loop (run after every edit)
+### Installation
 
-```bash
-npm run build         # TypeScript check + esbuild production bundle (main.js)
-npm run check:mobile  # Fails if isDesktopOnly: false and main.js requires Node/Electron built-ins
-npm run lint          # eslint-plugin-obsidianmd + manifest.json validation
-npm run test:unit     # Vitest unit tests (test/**/*.test.ts)
-```
-
-## Real-Obsidian E2E Tests (`wdio-obsidian-service`)
-
-E2E tests live in `test/e2e/**/*.e2e.ts` and launch real, sandboxed Obsidian instances against `test-vault`.
+No global `wdio` installation is required; WebdriverIO and `wdio-obsidian-service` live in `devDependencies`.
 
 ```bash
-npm run test:e2e:fast    # Desktop latest Obsidian only (fastest E2E check)
-npm run test:e2e:mobile  # Desktop emulated mobile (390x844) latest Obsidian only
-npm run test:e2e         # Full matrix: earliest/earliest + latest/latest (+ mobile emulation if isDesktopOnly: false)
-npm run test:e2e:android # Real Android APK via Appium + AVD named "obsidian_test"
+npm ci
 ```
 
-### How `manifest.json` Controls Mobile Testing Automatically
+- The first E2E run automatically downloads and caches Obsidian binaries into `.obsidian-cache/`.
+- Optional: set `OBSIDIAN_CACHE_DIR=/path/to/shared-cache` to reuse a single Obsidian binary cache across repositories.
+- On headless Linux, run E2E commands under `xvfb-run` (macOS and Windows run directly).
+- Mobile layout emulation runs via `npm run test:e2e:mobile` (no Android SDK needed).
+- Real Android E2E (`npm run test:e2e:android`) requires Android Studio with an AVD named `obsidian_test`.
 
-Both `wdio.conf.mts`, `scripts/check-mobile-compat.mjs`, and `.github/workflows/e2e.yml` read `manifest.json`:
-- **`isDesktopOnly: false`**:
-  - `check:mobile` enforces zero Node/Electron imports in `main.js`.
-  - `wdio.conf.mts` runs both Desktop and `emulateMobile: true` capabilities.
-  - CI runs `ubuntu-latest`, `windows-latest`, `macos-latest`, and `test-android` (Android API 36 emulator).
-- **`isDesktopOnly: true`**:
-  - `check:mobile` exits cleanly with a skip message.
-  - `wdio.conf.mts` runs Desktop capabilities only.
-  - CI automatically skips `test-android` while keeping the `check` gate green.
+### Testing SOP
 
-## Rules for Writing E2E Tests
+1. **On every change** (in `test/e2e/` and `src/`):
+```bash
+npm run build
+npm run check:mobile
+npm run lint
+npm run test:unit
+npm run test:e2e:fast    # Desktop latest Obsidian against test-vault/
+npm run test:e2e:mobile  # Emulated mobile UI (390x844, latest Obsidian)
+```
+2. **Before PR or release**:
+   - Run `npm run test:e2e` (tests `earliest/earliest` + `latest/latest` Obsidian versions) or push to run `.github/workflows/e2e.yml` (Linux/Windows/macOS desktop, mobile emulation, and Android API 36).
+- Before tagging a release, smoke-test iOS manually via BRAT (CI does not emulate iOS).
 
-1. **Wait for async rendering**: Obsidian renders Markdown/MathJax asynchronously. Use `browser.waitUntil(...)` instead of fixed sleeps.
-2. **Pass arguments into `browser.executeObsidian`**: Functions passed to `browser.executeObsidian(({ app, obsidian }, ...args) => ...)` are serialized across processes. Never capture outer variables in closures; pass them as trailing arguments.
-3. **Reset state between mutating tests**: Use `await obsidianPage.resetVault('test-vault')` in `beforeEach` (or before vault-mutating tests).
-4. **Keep specs platform-neutral**: Prefer `browser.executeObsidian(...)` + standard DOM assertions so the same spec runs on Linux, macOS, Windows, Mobile Emulation, and Android.
+## E2E Spec Rules
 
-## Reusing This Setup in Another Plugin Repo
-
-Copy these files into another Obsidian plugin repo:
-- `scripts/check-mobile-compat.mjs`
-- `wdio.conf.mts` & `wdio.mobile.conf.mts` (update `vault:` if your sample vault has a different folder name)
-- `vitest.config.ts` (if using Vitest)
-- `.github/workflows/e2e.yml` & `.github/workflows/check-new-obsidian.yml`
-- `AGENTS.md`
-
-Then install the WDIO devDependencies, add the npm scripts (`check:mobile`, `test:unit`, `test:e2e*`), ignore `.obsidian-cache/` and `obsidian-versions-lock.txt` in `.gitignore` and `eslint.config.mts`, and write plugin-specific specs in `test/e2e/*.e2e.ts`.
-
-## iOS Testing Note
-
-Automated iOS testing is not supported in CI because Obsidian iOS is a closed-source App Store binary. For mobile plugins, combine `check:mobile` + `emulateMobile` + Android CI with manual smoke testing on a physical iOS device via **BRAT** before tagging a final release.
+- Wait for async Markdown/MathJax rendering with `browser.waitUntil(...)` rather than fixed sleeps.
+- Pass arguments into `browser.executeObsidian(({ app, obsidian }, ...args) => ...)` as trailing parameters; functions are serialized across processes.
+- Reset vault state between mutating tests via `await obsidianPage.resetVault('test-vault')`.
