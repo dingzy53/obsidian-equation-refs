@@ -15,6 +15,12 @@ export default defineConfig(
 		'package-lock.json',
 		'tsconfig.json',
 		'test-vault',
+		'.obsidian-cache',
+		'scripts',
+		'vitest.config.ts',
+		'wdio.conf.mts',
+		'wdio.mobile.conf.mts',
+		'test/e2e',
 	]),
 	{
 		languageOptions: {

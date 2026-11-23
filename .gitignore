@@ -13,6 +13,8 @@ main.js
 # obsidian
 data.json
 test-vault/.obsidian/
+.obsidian-cache/
+obsidian-versions-lock.txt
 
 # OS
 .DS_Store
