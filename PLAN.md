@@ -1,72 +1,39 @@
-# PLAN: prevent transient blank reference after programmatic editor restore
+# PLAN: QA audit fixes (equation-refs)
 
-> Branch: `fix/blank-ref-after-external-change` (from `main` at `65de4d4`, tag `1.0.2`) · Date: 2026-11-20 · Status: Fixes 1 and 2 implemented.
+> Branch: `fix/qa-audit-fixes` (from `fix/cold-boot-mathjax-race`) · Date: 2026-11-24 · Status: Implemented and verified.
 >
-> The initial build plan for Equation Refs 1.0.0 is finished and shipped; see git history at `65de4d4` for its text.
+> The previous `fix/cold-boot-mathjax-race` plan is preserved in git history.
 
-## Context
+## Context & Findings
 
-In the 2026-11-20 hands-on test report on macOS 14 (Obsidian 1.13.7), `obsidian-equation-refs` 1.0.2 passed Live Preview and Reading view numbering, `\tag{N2}`, `\notag`, same-note `(n)` and cross-note `Equations (1)` reference formatting, aliased links, and live renumbering when removing a link.
+From `/Users/ding/GitHub/OBSIDIAN_PLUGINS_QA_REPORT.md`:
 
-One minor issue was reported:
-- Right after an Uncommitted plugin **"restore"**, the highlighted line showed `[[#^pyth]]` as **empty text** (`"Pythagoras: ."`) until the cursor moved.
+1. **BUG-01 (P1)**: Live Preview equation links go blank after renumbering or a format change (`Same-note reference format` -> `Eq. {n}`). Links whose text did not change remain visible; links whose text changed render as empty text until the note is closed and reopened.
+2. **BUG-09 (P3)**: Ctrl/Cmd-hover popover over `Maxwell (1)` shows the equation without its `(1)` number, although inline embeds (`![[Maxwell#^gauss]]`) show it.
 
-## 1. Transient blank `[[#^id]]` reference in Live Preview after programmatic edit
+## Verified Root Causes & Fix Design
 
-### Symptom
-When another plugin (such as `obsidian-uncommited`'s per-change **Restore**) restores a line containing a same-note equation link `[[#^pyth]]` via `editor.transaction(...)` and scrolls/highlights the line (`leaf.setEphemeralState({ line })`), the line briefly renders as `"Pythagoras: ."` (with `[[#^pyth]]` invisible) until the cursor is moved.
+### 1. Live Preview blank links after renumber / format change (`src/render/live-preview/reference-links.ts`)
+- Obsidian's built-in Live Preview formatting plugin (`Yoe`) runs at default precedence before `editorExtensions` and emits `Decoration.replace` (`Qoe`, empty `<span>`) over the `[[#` opener (`[start, start+3]`).
+- When `ReferenceLinksView` rebuilds decorations via `refresh` without `docChanged`, `RangeSet.compare` treats `[start, start+3]` as unchanged and emits only `[start+3, end]`. CodeMirror's `RangeSet.spans` sees `pointFrom < from` (`openStart > active.length`), calls `TileUpdate.continueWidget()`, extends `Qoe`'s empty `<span>`, and drops `ReferenceWidget`.
+- **Fix**: Wrap `ViewPlugin.define(...)` in `Prec.high(...)` in `referenceLinksInEditor()` so `ReferenceWidget` takes precedence over `Yoe` and owns the full `[start, end]` range directly.
 
-### Cause (verified in `src/render/live-preview/reference-links.ts`, `src/index/equation-numbers.ts`, and `obsidian-uncommited/src/main.ts`)
-1. **What Uncommitted's Restore does (`obsidian-uncommited/src/main.ts:340-347`):**
-   - Calls `editor.transaction({ changes: [...], selection: { from: editor.offsetToPos(edits[0]!.from) } }, 'better-md-diff.revert')`, followed by `leaf.setEphemeralState({ line })`.
-   - The cursor is placed at the start of the restored block (column 0 of `"Pythagoras: [[#^pyth]]."`), **not** inside `[[#^pyth]]`.
-2. **What Obsidian's built-in Live Preview link decoration does for `[[#^pyth]]`:**
-   - For a same-note block link `[[#^pyth]]` (empty note path before `#^pyth` and no `|alias`), when the cursor is not inside the link token, Obsidian's own Live Preview internal-link widget hides the raw `[[#^pyth]]` syntax and displays the target note path—which is **`""` (empty string)**!
-   - Thus, whenever `ReferenceLinksView` (`src/render/live-preview/reference-links.ts:58-85`) does **not** emit a replacement `ReferenceWidget` for `[[#^pyth]]` (while the cursor is outside `[[#^pyth]]`), Obsidian's built-in Live Preview widget collapses `[[#^pyth]]` to empty text (`"Pythagoras: ."`).
-3. **Why `ReferenceLinksView.build()` fails to emit a widget right after the restore transaction:**
-   - Look at `src/render/live-preview/reference-links.ts:72-77`:
-     ```ts
-     if (/code|math|comment/.test(tree.resolveInner(start, 1).name)) continue;
+### 2. Hover popover equation numbering & same-note embeds (`src/core/math-source.ts`, `src/index/equation-numbers.ts`, `src/main.ts`, `src/render/reading-view.ts`)
+- For multi-line `$$\n...\n$$\n^gauss`, Obsidian slices `block.position` (omitting `^gauss`) inside both inline embeds and block hover popovers.
+- Inline embeds recover via `.internal-embed[src]`, but `EquationNumberChild.target()` passed `this.fromSection?.path ?? ''`, breaking same-note multi-line embeds (`![[#^gauss]]`).
+- Hover popovers wrap the block in `.hover-popover .markdown-embed[data-type="block"]` with no `.internal-embed[src]`.
+- **Fix**:
+  - Pass `ctx.sourcePath` into `EquationNumberChild` (including via `PendingMathChild`) and use it in `embedTarget(...)`.
+  - Listen for `hover-link` on `app.workspace` in `EquationRefsPlugin` to track the hovered block ID per note path, and record normalized TeX per `(path, id)` in `EquationNumbers` for verification and unique-TeX fallback strictly inside `.hover-popover .markdown-embed[data-type="block"]`.
 
-     const target = link.path ? metadataCache.getFirstLinkpathDest(link.path, source.path) : source;
-     const label = target ? this.plugin.numbers.get(target.path, link.id) : undefined;
-     if (!target || !label) continue;
-     ```
-   - There are two ways `ReferenceLinksView.build()` skips the link right after `editor.transaction(...)`:
-     - **Stale `EquationNumbers` cache (`!label`):** While `[[#^pyth]]` (or the `$$ … $$ ^pyth` block) was deleted or modified prior to the restore, `metadataCache.on('changed')` had updated `ReferenceIndex` and `EquationNumbers` and removed `pyth` from `this.labels` (since unreferenced equations are not numbered). When `editor.transaction` restores `[[#^pyth]]` into the CodeMirror buffer, `ReferenceLinksView.update` runs **synchronously** on `update.docChanged`, whereas Obsidian's `metadataCache.on('changed')` does not fire until the editor buffer is flushed and re-indexed (~1–2 seconds later), or not until focus/cursor changes if `setEphemeralState` interfered. During that window, `this.plugin.numbers.get(source.path, "pyth")` returns `undefined`!
-     - **Even when `metadataCache.on('changed')` fires:** if the equation and its link were both in the same note or if `sameLabels(prev, next)` in `EquationNumbers.recompute()` (`src/index/equation-numbers.ts:137`) returned `true` (because the equation's number didn't change—for instance, another link to `^pyth` existed, or `recompute` ran before), `this.events.trigger('changed', path)` is **not** called!
+## Order of Work
 
-### Fix
+1. `[x]` Wrap `ReferenceLinksView` in `Prec.high` (`src/render/live-preview/reference-links.ts`) and add a CodeMirror 6 regression test.
+2. `[x]` Add `normalizeEquationTex` / `resolveHoverEquationId` (`src/core/math-source.ts`), TeX index lookup (`src/index/equation-numbers.ts`), `hover-link` tracking (`src/main.ts`), and `EquationNumberChild` hover/same-note embed resolution (`src/render/reading-view.ts`), plus unit tests.
+3. `[x]` Run `npm run lint`, `npm test`, and `npm run build`, update status to verified, and push `fix/qa-audit-fixes`.
 
-1. **[x] Done. Synchronous same-note fallback in Live Preview (`src/render/live-preview/reference-links.ts`):**
-   - When `link.path === ""` (or `target.path === source.path`) and `this.plugin.numbers.get(source.path, link.id)` returns `undefined`, compute the current note's labels on the fly from `state.doc` using the existing pure helpers (`scanMathBlocks` from `src/core/math-source.ts` + `findBlockLinks` from `src/core/links.ts` + `numberEquations` from `src/core/numbering.ts`), cached per `state.doc` (just like `EquationNumbersView` in `src/render/live-preview/equation-numbers.ts:62-65` already caches `scanMathBlocks` per `state.doc`!).
-   - Also do the same live-doc fallback in `EquationNumbersView.read()` (`src/render/live-preview/equation-numbers.ts:75`) when `this.plugin.numbers.get(path, id)` is not yet populated by `metadataCache`.
-   - Result: in Live Preview, adding or restoring a same-note `[[#^id]]` link or `$$ … $$ ^id` equation numbers both the equation and the reference **immediately on the same frame**, without waiting for `metadataCache`!
+## Verification Plan
 
-2. **[x] Done (shows `#^id`). Never let an unnumbered same-note `[[#^id]]` collapse to empty text in Live Preview (`src/render/live-preview/reference-links.ts`):**
-   - If `link.path === ""` and `label` is still `undefined` (for example, `^id` points to a non-existent equation or an equation with `\notag`), Obsidian's built-in Live Preview widget would render `[[#^id]]` as `""` (invisible!).
-   - Emit a fallback `ReferenceWidget` showing `(#^${link.id})` or `[[#^${link.id}]]` (or keep it visible) so a broken/unnumbered same-note block link never disappears into empty text when the cursor leaves the link.
-
-## Tests
-
-- Unit tests in `test/core.test.ts`:
-  - [x] Live-document numbering helper given raw note text with `$$ … $$ ^pyth` and `[[#^pyth]]` (`src/core/live-numbering.ts`).
-- Known gap: `findBlockLinks` also matches `[[#^x]]` inside code, which the metadata cache ignores. An equation linked only from code is numbered in Live Preview but not in Reading view.
-- Manual repro in `test-vault/`:
-  1. Open a note in `test-vault/` containing a single equation `^pyth` and a line `Pythagoras: [[#^pyth]].` in Live Preview.
-  2. Delete `[[#^pyth]]`, wait 2 seconds for `metadataCache` to unnumber `^pyth`, then restore the change via Uncommitted's **Restore** button (or `Cmd+Z`).
-  3. Confirm `Pythagoras: (1).` renders immediately on restore without moving the cursor.
-
-## Order of work
-
-1. [x] `Compute same-note equation labels from the live editor buffer when the metadata cache is behind` (`src/render/live-preview/reference-links.ts`, `src/render/live-preview/equation-numbers.ts`, `test/core.test.ts`).
-
-2. [x] `Show unnumbered same-note block links as their link text in Live Preview` (`src/core/links.ts`, `src/render/live-preview/reference-links.ts`, `test/core.test.ts`).
-
-## Verification
-
-- `npm test`, `npm run lint`, `npm run build`.
-
-## Open questions for the owner
-
-1. Decided 2026-11-21: the owner chose to always show `#^id` for unnumbered same-note links, including non-equation blocks. Original question: When a same-note block link `[[#^foo]]` does **not** point to any numbered equation (e.g. a link to a regular paragraph block `^foo`, or to an equation with `\notag`), Obsidian's own Live Preview renders `[[#^foo]]` as empty text unless aliased. Should Equation Refs leave non-equation `[[#^foo]]` links to Obsidian as it does today (`if (!label) continue`), and only use the live-document `scanMathBlocks` fallback for equations? (Recommended: yes, only touch links whose target is a math block in `scanMathBlocks` or `EquationNumbers`, so non-equation block links are never altered.)
+- `npm run lint` (0 errors, 0 warnings)
+- `npm test` (Vitest unit tests including CM6 `Prec.high` and hover/TeX helpers)
+- `npm run build` (`tsc -noEmit -skipLibCheck && node esbuild.config.mjs production`)

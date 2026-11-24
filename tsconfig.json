@@ -14,6 +14,7 @@
 		"skipLibCheck": true,
 		"forceConsistentCasingInFileNames": true,
 		"allowSyntheticDefaultImports": true,
+		"types": ["node", "@wdio/globals/types", "wdio-obsidian-service"],
 		"lib": ["ES2021", "DOM", "DOM.Iterable"]
 	},
 	"include": ["src/**/*.ts", "test/**/*.ts"]

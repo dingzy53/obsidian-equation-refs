@@ -1,6 +1,7 @@
 import { EquationLabel } from '../core/numbering';
 
 export const DISPLAY_MATH = 'mjx-container.MathJax[display="true"]';
+export const DISPLAY_MATH_PLACEHOLDER = '.math.math-block';
 const NUMBER_ATTR = 'data-eq-number';
 const NUMBERED_CLASS = 'eqref-numbered';
 
